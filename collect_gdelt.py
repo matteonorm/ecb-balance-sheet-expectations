@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from datetime import datetime, timedelta
 
@@ -15,6 +16,10 @@ from config import (
 )
 
 
+def log(msg):
+    print(msg, flush=True)
+
+
 def fetch_gdelt_articles(keyword, start_date, end_date):
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -28,38 +33,35 @@ def fetch_gdelt_articles(keyword, start_date, end_date):
         "enddatetime": end_dt.strftime("%Y%m%d%H%M%S"),
     }
 
-    for attempt in range(GDELT_MAX_RETRIES):
+    for attempt in range(5):
         try:
-            resp = requests.get(GDELT_API_URL, params=params, timeout=30)
+            resp = requests.get(GDELT_API_URL, params=params, timeout=15)
             if resp.status_code == 429:
                 wait = (2 ** attempt) * 30
-                print(f"    Rate limited, waiting {wait}s...")
+                log(f"    Rate limited, waiting {wait}s...")
                 time.sleep(wait)
                 continue
-            resp.raise_for_status()
-
+            if resp.status_code != 200:
+                log(f"    HTTP {resp.status_code}, skipping")
+                return []
             try:
                 data = resp.json()
             except json.JSONDecodeError:
                 return []
-
-            articles = data.get("articles", [])
-            return articles
-
-        except requests.exceptions.RequestException as e:
-            if attempt < GDELT_MAX_RETRIES - 1:
-                time.sleep(10)
+            return data.get("articles", [])
+        except (requests.exceptions.RequestException, Exception) as e:
+            if attempt < 4:
+                log(f"    Retry {attempt+1}: {type(e).__name__}")
+                time.sleep(5)
             else:
-                print(f"    Failed after {GDELT_MAX_RETRIES} attempts: {e}")
+                log(f"    Failed: {type(e).__name__}: {e}")
                 return []
-
     return []
 
 
 def generate_monthly_windows(start_date, end_date):
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-
     windows = []
     current = start_dt.replace(day=1)
     while current < end_dt:
@@ -68,6 +70,30 @@ def generate_monthly_windows(start_date, end_date):
         windows.append((current.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")))
         current = next_month
     return windows
+
+
+def insert_article(con, art, keyword):
+    url = art.get("url", "")
+    title = art.get("title", "")
+    seendate = art.get("seendate", "")
+    if not url or not title:
+        return False
+    try:
+        seen_dt = datetime.strptime(seendate, "%Y%m%dT%H%M%SZ")
+        seendate_formatted = seen_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        seendate_formatted = seendate
+    try:
+        con.execute(
+            """INSERT OR IGNORE INTO gdelt_articles
+               (url, title, seendate, domain, language, sourcecountry, query_keyword)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [url, title, seendate_formatted, art.get("domain", ""),
+             art.get("language", ""), art.get("sourcecountry", ""), keyword],
+        )
+        return True
+    except Exception:
+        return False
 
 
 def collect_gdelt(db_path=DUCKDB_PATH, start_date=DATE_START):
@@ -80,77 +106,36 @@ def collect_gdelt(db_path=DUCKDB_PATH, start_date=DATE_START):
     query_num = 0
 
     for keyword in GDELT_KEYWORDS:
-        print(f"\nKeyword: {keyword}")
+        log(f"\nKeyword: {keyword}")
         for win_start, win_end in windows:
             query_num += 1
             articles = fetch_gdelt_articles(keyword, win_start, win_end)
 
             inserted = 0
             for art in articles:
-                url = art.get("url", "")
-                title = art.get("title", "")
-                seendate = art.get("seendate", "")
-                domain = art.get("domain", "")
-                language = art.get("language", "")
-                sourcecountry = art.get("sourcecountry", "")
-
-                if not url or not title:
-                    continue
-
-                try:
-                    seen_dt = datetime.strptime(seendate, "%Y%m%dT%H%M%SZ")
-                    seendate_formatted = seen_dt.strftime("%Y-%m-%d %H:%M:%S")
-                except (ValueError, TypeError):
-                    seendate_formatted = seendate
-
-                try:
-                    con.execute(
-                        """INSERT OR IGNORE INTO gdelt_articles
-                           (url, title, seendate, domain, language, sourcecountry, query_keyword)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        [url, title, seendate_formatted, domain, language,
-                         sourcecountry, keyword],
-                    )
+                if insert_article(con, art, keyword):
                     inserted += 1
-                except Exception:
-                    pass
 
             if len(articles) >= 250:
-                print(f"  [{query_num}/{total_queries}] {win_start}: {len(articles)} articles (HIT CAP)")
+                log(f"  [{query_num}/{total_queries}] {win_start}: {len(articles)} (HIT CAP)")
                 mid = datetime.strptime(win_start, "%Y-%m-%d") + timedelta(days=15)
                 mid_str = mid.strftime("%Y-%m-%d")
+                time.sleep(GDELT_DELAY_SECONDS)
                 extra = fetch_gdelt_articles(keyword, mid_str, win_end)
                 for art in extra:
-                    url = art.get("url", "")
-                    title = art.get("title", "")
-                    seendate = art.get("seendate", "")
-                    if not url or not title:
-                        continue
-                    try:
-                        seen_dt = datetime.strptime(seendate, "%Y%m%dT%H%M%SZ")
-                        seendate_formatted = seen_dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except (ValueError, TypeError):
-                        seendate_formatted = seendate
-                    try:
-                        con.execute(
-                            """INSERT OR IGNORE INTO gdelt_articles
-                               (url, title, seendate, domain, language, sourcecountry, query_keyword)
-                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                            [url, title, seendate_formatted, art.get("domain", ""),
-                             art.get("language", ""), art.get("sourcecountry", ""), keyword],
-                        )
+                    if insert_article(con, art, keyword):
                         inserted += 1
-                    except Exception:
-                        pass
-                time.sleep(GDELT_DELAY_SECONDS)
             elif articles:
-                print(f"  [{query_num}/{total_queries}] {win_start}: {len(articles)} articles")
+                log(f"  [{query_num}/{total_queries}] {win_start}: {len(articles)} articles")
+            else:
+                if query_num % 20 == 0:
+                    log(f"  [{query_num}/{total_queries}] {win_start}: 0 articles")
 
             total_inserted += inserted
             time.sleep(GDELT_DELAY_SECONDS)
 
     total = con.execute("SELECT COUNT(*) FROM gdelt_articles").fetchone()[0]
-    print(f"\nTotal articles in database: {total} (newly inserted: {total_inserted})")
+    log(f"\nTotal articles in database: {total} (newly inserted: {total_inserted})")
 
     coverage = con.execute("""
         SELECT strftime(seendate, '%Y-%m') AS month, COUNT(*) AS n
@@ -159,7 +144,7 @@ def collect_gdelt(db_path=DUCKDB_PATH, start_date=DATE_START):
     """).fetchall()
     low_coverage = [(m, n) for m, n in coverage if n < 10]
     if low_coverage:
-        print(f"\nLow coverage months (<10 articles): {low_coverage}")
+        log(f"\nLow coverage months (<10 articles): {low_coverage}")
 
     con.close()
     return total_inserted

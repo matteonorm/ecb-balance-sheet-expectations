@@ -5,4 +5,6 @@ __pycache__/
 .env
 data/
 output/
+!output/*.png
+!output/*.csv
 .claude/

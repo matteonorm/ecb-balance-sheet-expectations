@@ -17,16 +17,12 @@ SMA_PDF_BASE = "https://www.ecb.europa.eu/stats/ecb_surveys/sma/shared/pdf/"
 GDELT_KEYWORDS = [
     '"ECB balance sheet"',
     '"ECB asset purchases"',
-    '"ECB quantitative easing"',
-    '"ECB quantitative tightening"',
-    '"PEPP purchases"',
-    '"APP purchases"',
-    '"Eurosystem balance sheet"',
-    '"ECB bond buying"',
+    '"ECB quantitative easing" OR "ECB quantitative tightening"',
+    '"PEPP" OR "APP" ECB purchases',
 ]
 
 GDELT_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_DELAY_SECONDS = 5.0
+GDELT_DELAY_SECONDS = 15.0
 GDELT_MAX_RETRIES = 3
 
 ECB_DATA_API = "https://data-api.ecb.europa.eu/service/data"
