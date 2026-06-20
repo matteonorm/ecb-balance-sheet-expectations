@@ -118,17 +118,13 @@ def plot_main_comparison(llm_df, sma_df, ecb_df, policy_bs_df, output_dir):
     llm["date"] = pd.to_datetime(llm["period"] + "-15")
     llm_valid = llm.dropna(subset=["f_statistic"])
 
-    # Top panel: policy balance sheet (securities + lending) + SMA
+    # Top panel: securities held for monetary policy + SMA
     if not policy_bs_df.empty:
         pol = policy_bs_df.copy()
         pol["observation_date"] = pd.to_datetime(pol["observation_date"])
-        ax1.plot(pol["observation_date"], pol["total_policy_eur"] / 1e3,
+        ax1.plot(pol["observation_date"], pol["securities_eur"] / 1e3,
                  color=COLORS["ecb_assets"], linewidth=2,
-                 label="Securities + lending (policy BS)")
-        ax1.fill_between(pol["observation_date"],
-                         pol["securities_eur"] / 1e3,
-                         pol["total_policy_eur"] / 1e3,
-                         color=COLORS["increase"], alpha=0.15, label="Lending (TLTROs)")
+                 label="Securities held for monetary policy")
 
     if not sma_df.empty:
         sma = sma_df.copy()
@@ -142,7 +138,7 @@ def plot_main_comparison(llm_df, sma_df, ecb_df, policy_bs_df, output_dir):
     ax1.set_ylabel("EUR billion")
     _add_light_grid(ax1)
     ax1.legend(loc="upper left", frameon=False, fontsize=9)
-    ax1.set_title("Eurosystem policy balance sheet and survey expectations", loc="left")
+    ax1.set_title("Eurosystem securities held for monetary policy and survey expectations", loc="left")
 
     # Bottom panel: LLM F_t
     ax2.bar(llm_valid["date"], llm_valid["f_statistic"],
@@ -335,7 +331,7 @@ def plot_confidence_distribution(classification_detail, output_dir):
 
 
 def plot_ecb_bs_with_regimes(policy_bs_df, output_dir):
-    """Figure 6: Eurosystem policy balance sheet with decomposition and regimes."""
+    """Figure 6: Securities held for monetary policy with regime annotations."""
     if policy_bs_df.empty:
         return
 
@@ -344,15 +340,8 @@ def plot_ecb_bs_with_regimes(policy_bs_df, output_dir):
 
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    ax.fill_between(pol["observation_date"],
-                    0, pol["securities_eur"] / 1e3,
-                    color=COLORS["ecb_assets"], alpha=0.3, label="Securities (APP+PEPP+SMP)")
-    ax.fill_between(pol["observation_date"],
-                    pol["securities_eur"] / 1e3,
-                    pol["total_policy_eur"] / 1e3,
-                    color=COLORS["increase"], alpha=0.3, label="Lending (TLTROs)")
-    ax.plot(pol["observation_date"], pol["total_policy_eur"] / 1e3,
-            color=COLORS["ecb_assets"], linewidth=1.5)
+    ax.plot(pol["observation_date"], pol["securities_eur"] / 1e3,
+            color=COLORS["ecb_assets"], linewidth=2)
 
     regimes = [
         ("2019-11-01", "2022-06-30", "QE restart + PEPP", COLORS["increase"]),
@@ -360,16 +349,15 @@ def plot_ecb_bs_with_regimes(policy_bs_df, output_dir):
     ]
     for start, end, label, color in regimes:
         s, e = pd.Timestamp(start), pd.Timestamp(end)
-        ax.axvspan(s, e, alpha=0.06, color=color)
+        ax.axvspan(s, e, alpha=0.08, color=color)
         mid = s + (e - s) / 2
         y_pos = ax.get_ylim()[1] * 0.95
         ax.text(mid, y_pos, label, ha="center", va="top",
                 fontsize=8, color=COLORS["annotation"], style="italic")
 
     ax.set_ylabel("EUR billion")
-    ax.set_title("Eurosystem policy balance sheet: securities and lending", loc="left")
+    ax.set_title("Securities held for monetary policy and policy regimes", loc="left")
     _add_light_grid(ax)
-    ax.legend(loc="upper left", frameon=False, fontsize=9)
 
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax.xaxis.set_major_locator(mdates.YearLocator())
