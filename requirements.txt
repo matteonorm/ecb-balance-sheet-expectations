@@ -1,0 +1,6 @@
+duckdb>=1.0
+pandas
+requests
+anthropic
+matplotlib
+openpyxl
