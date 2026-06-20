@@ -22,7 +22,7 @@ Over 21 overlapping months with SMA data, the Pearson correlation between F_t an
 ## Figures
 
 ### Figure 1: Main comparison
-Eurosystem total assets with SMA survey medians (top) and LLM balance statistic with key policy events annotated (bottom).
+APP + PEPP bond holdings with SMA survey medians (top) and LLM balance statistic with key policy events annotated (bottom).
 
 ![Main comparison](output/fig1_main_comparison.png)
 
@@ -47,7 +47,7 @@ Distribution of the LLM's self-reported confidence scores by classification dire
 ![Confidence](output/fig5_confidence_distribution.png)
 
 ### Figure 6: ECB balance sheet with policy regimes
-Eurosystem total assets with shaded bands for the three main policy regimes: APP net purchases, QE restart + PEPP, and quantitative tightening.
+APP + PEPP bond holdings with shaded bands for the main policy regimes: QE restart + PEPP, and quantitative tightening.
 
 ![Regimes](output/fig6_ecb_bs_regimes.png)
 
@@ -58,7 +58,7 @@ Eurosystem total assets with shaded bands for the three main policy regimes: APP
 | ECB SMA CSV files | Dec 2021 - present | Direct download from ECB website |
 | GDELT DOC 2.0 API | Apr 2019 - Apr 2020 | Keyword search for ECB balance sheet articles |
 | Google News RSS | 2009 - 2026 | RSS feed search for ECB-related queries |
-| ECB Data Portal | 2019 - present | Weekly Eurosystem total assets (series ILM/W.U2.C.T000000.Z5.Z01) |
+| ECB APP/PEPP CSVs | Oct 2014 - present | Monthly APP and PEPP bond holdings from ECB published breakdowns |
 
 ## Pipeline
 
@@ -67,7 +67,7 @@ schema.py          Create DuckDB tables (idempotent)
 collect_sma.py     Download ECB SMA survey data
 collect_gdelt.py   Fetch articles from GDELT API
 collect_gnews.py   Fetch articles from Google News RSS
-collect_ecb_bs.py  Download actual ECB balance sheet data
+collect_ecb_bs.py  Download APP + PEPP holdings from ECB CSVs
 process_headlines.py  Classify headlines with Claude (Bybee method)
 aggregate.py       Compute monthly F_t balance statistic
 compare.py         Pearson/Spearman correlation analysis
@@ -94,7 +94,7 @@ All data is stored in a single DuckDB file (`ecb_bs.duckdb`) with tables:
 - `gdelt_articles` - News article headlines
 - `llm_classifications` - LLM direction classifications
 - `llm_expectations` - Monthly aggregated F_t
-- `ecb_balance_sheet` - Actual ECB total assets
+- `ecb_app_pepp` - APP + PEPP bond holdings (actual)
 
 ## Methodology
 

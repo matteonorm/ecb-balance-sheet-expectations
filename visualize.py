@@ -66,8 +66,11 @@ def load_all_data(db_path=DUCKDB_PATH):
     """).fetchdf()
 
     ecb_df = con.execute("""
-        SELECT observation_date, total_assets_eur
-        FROM ecb_balance_sheet ORDER BY observation_date
+        SELECT observation_date,
+               app_holdings_eur,
+               pepp_holdings_eur,
+               total_holdings_eur
+        FROM ecb_app_pepp ORDER BY observation_date
     """).fetchdf()
 
     article_counts = con.execute("""
@@ -111,22 +114,22 @@ def plot_main_comparison(llm_df, sma_df, ecb_df, output_dir):
     if not ecb_df.empty:
         ecb = ecb_df.copy()
         ecb["observation_date"] = pd.to_datetime(ecb["observation_date"])
-        ax1.plot(ecb["observation_date"], ecb["total_assets_eur"] / 1e6,
-                 color=COLORS["ecb_assets"], linewidth=2, label="Eurosystem total assets")
+        ax1.plot(ecb["observation_date"], ecb["total_holdings_eur"] / 1e3,
+                 color=COLORS["ecb_assets"], linewidth=2, label="APP + PEPP holdings")
 
     if not sma_df.empty:
         sma = sma_df.copy()
         sma["vintage_date"] = pd.to_datetime(sma["vintage_date"])
         sma["forecast_date"] = pd.to_datetime(sma["forecast_date"])
         first_fc = sma.groupby("vintage").first().reset_index()
-        ax1.scatter(first_fc["vintage_date"], first_fc["total_holdings_eur"] / 1e3,
+        ax1.scatter(first_fc["vintage_date"], first_fc["total_holdings_eur"],
                     color=COLORS["sma"], edgecolors="#b8860b", s=35, zorder=5,
                     linewidths=0.5, label="SMA median (next quarter)")
 
-    ax1.set_ylabel("EUR trillion")
+    ax1.set_ylabel("EUR billion")
     _add_light_grid(ax1)
     ax1.legend(loc="upper left", frameon=False, fontsize=9)
-    ax1.set_title("ECB balance sheet: actual path and survey expectations", loc="left")
+    ax1.set_title("ECB bond holdings (APP + PEPP): actual path and survey expectations", loc="left")
 
     # Bottom panel: LLM F_t
     ax2.bar(llm_valid["date"], llm_valid["f_statistic"],
@@ -325,11 +328,11 @@ def plot_ecb_bs_with_regimes(ecb_df, output_dir):
 
     ecb = ecb_df.copy()
     ecb["observation_date"] = pd.to_datetime(ecb["observation_date"])
-    ecb["total_tn"] = ecb["total_assets_eur"] / 1e6
+    ecb["total_bn"] = ecb["total_holdings_eur"] / 1e3
 
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    ax.plot(ecb["observation_date"], ecb["total_tn"],
+    ax.plot(ecb["observation_date"], ecb["total_bn"],
             color=COLORS["ecb_assets"], linewidth=2)
 
     regimes = [
@@ -344,8 +347,8 @@ def plot_ecb_bs_with_regimes(ecb_df, output_dir):
         ax.text(mid, y_pos, label, ha="center", va="top",
                 fontsize=8, color=COLORS["annotation"], style="italic")
 
-    ax.set_ylabel("EUR trillion")
-    ax.set_title("Eurosystem total assets and monetary policy regimes", loc="left")
+    ax.set_ylabel("EUR billion")
+    ax.set_title("APP + PEPP bond holdings and monetary policy regimes", loc="left")
     _add_light_grid(ax)
 
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))

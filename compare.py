@@ -31,8 +31,8 @@ def load_data(db_path=DUCKDB_PATH):
     """).fetchdf()
 
     ecb_df = con.execute("""
-        SELECT observation_date, total_assets_eur
-        FROM ecb_balance_sheet
+        SELECT observation_date, total_holdings_eur
+        FROM ecb_app_pepp
         ORDER BY observation_date
     """).fetchdf()
 
