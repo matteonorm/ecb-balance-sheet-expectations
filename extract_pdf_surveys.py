@@ -208,11 +208,26 @@ def ingest_pdf_extractions(results, db_path=DUCKDB_PATH):
             q_type = item.get('question_type', '')
             variable = item.get('variable', '')
 
-            if q_type in ('soma_change_path', 'purchase_pace', 'reserve_path'):
+            PATH_TYPES = {
+                'soma_change_path', 'purchase_pace', 'reserve_path',
+                'soma_size_dist', 'soma_portfolio_level', 'soma_total_domestic_assets',
+                'asset_purchase_pace', 'monthly_purchase_pace', 'soma_portfolio_change',
+                'soma_change_agency_mbs', 'soma_change_treasuries',
+                'soma_securities_agency', 'soma_securities_treasuries',
+                'reserves_level', 'reserves_change',
+            }
+
+            if q_type in PATH_TYPES:
                 for h in item.get('horizons', []):
                     period = h.get('period', '')
                     horizon_date = _period_to_date(period)
                     if not horizon_date:
+                        continue
+
+                    p50 = h.get('pctl50')
+                    if p50 is None:
+                        p50 = h.get('average')
+                    if p50 is None:
                         continue
 
                     var_name = f"{variable}_{q_type}"
@@ -223,7 +238,7 @@ def ingest_pdf_extractions(results, db_path=DUCKDB_PATH):
                         'variable': var_name,
                         'horizon_date': horizon_date,
                         'pctl25': h.get('pctl25'),
-                        'pctl50': h.get('pctl50') or h.get('average'),
+                        'pctl50': p50,
                         'pctl75': h.get('pctl75'),
                         'respondent_count': h.get('n_responses'),
                         'source_file': source_file,
@@ -242,7 +257,7 @@ def ingest_pdf_extractions(results, db_path=DUCKDB_PATH):
                         'source_file': source_file,
                     })
 
-            elif q_type in ('runoff_size', 'soma_size_dist'):
+            elif q_type == 'runoff_size':
                 for h in item.get('horizons', []):
                     runoff_rows.append({
                         'survey_date': survey_date,
@@ -288,6 +303,19 @@ def _period_to_date(period_str):
 
     s = str(period_str).strip()
 
+    # Skip non-date strings
+    skip_patterns = [
+        r'^(?:Current|Modal|Program|Range|Purchases|Sales|Neutral|Steady)',
+        r'^(?:Announcement|Change Extended|Increase IOER)',
+        r'^(?:Agency|Treasury|Treasuries|MBS|Halting|ON RRP|Reverse|Term Dep)',
+        r'^(?:SOMA (?:size|portfolio|growth|minimum)|Portfolio|Period|Earliest)',
+        r'^(?:At |Relative|Months |Expected|When |Timing)',
+        r'(?:Relative to|months$)',
+    ]
+    for pat in skip_patterns:
+        if re.search(pat, s, re.I):
+            return None
+
     q_match = re.match(r'(\d{4})\s*Q(\d)', s)
     if q_match:
         year, q = int(q_match.group(1)), int(q_match.group(2))
@@ -316,15 +344,44 @@ def _period_to_date(period_str):
     if ye_match:
         return f"{ye_match.group(1)}-12-31"
 
+    ye_match2 = re.match(r'(\d{4})\s+YE', s)
+    if ye_match2:
+        return f"{ye_match2.group(1)}-12-31"
+
     cy_match = re.match(r'(\d{4})\s*CY', s)
     if cy_match:
         return f"{cy_match.group(1)}-06-30"
+
+    cy_match2 = re.match(r'CY\s+(\d{4})', s)
+    if cy_match2:
+        return f"{cy_match2.group(1)}-06-30"
+
+    end_match = re.match(r'End of (\d{4})', s, re.I)
+    if end_match:
+        return f"{end_match.group(1)}-12-31"
+
+    total_match = re.match(r'Total(?:\s+in)?\s+(\d{4})', s, re.I)
+    if total_match:
+        return f"{total_match.group(1)}-06-30"
+
+    avg_match = re.match(r'(\d{4})\s+[Aa]verage', s)
+    if avg_match:
+        return f"{avg_match.group(1)}-06-30"
+
+    within_match = re.match(r'[Ww]ithin\s+(\d+)\s+year', s)
+    if within_match:
+        return None
 
     months = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
               'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
               'january': 1, 'february': 2, 'march': 3, 'april': 4,
               'june': 6, 'july': 7, 'august': 8, 'september': 9,
               'october': 10, 'november': 11, 'december': 12}
+
+    for mname, mnum in months.items():
+        fomc_match = re.search(rf'{mname}[.\s]+\d{{1,2}}(?:-\d{{1,2}})?,?\s*(\d{{4}})', s, re.I)
+        if fomc_match:
+            return f"{fomc_match.group(1)}-{mnum:02d}-15"
 
     for mname, mnum in months.items():
         m_match = re.search(rf'{mname}[.\s]*(\d{{4}})', s, re.I)
@@ -334,15 +391,18 @@ def _period_to_date(period_str):
         if m_match2:
             return f"{m_match2.group(1)}-{mnum:02d}-15"
 
-    # Date patterns like "June 18-19:" with year inferred from context
     for mname, mnum in months.items():
         m_match = re.search(rf'{mname}\s+\d{{1,2}}', s, re.I)
         if m_match:
-            return None  # Can't determine year, skip
+            return None
 
     year_match = re.match(r'^(\d{4})$', s.strip())
     if year_match:
         return f"{year_match.group(1)}-06-30"
+
+    range_match = re.match(r'(\d{4})-(\d{4})\s+(?:Minimum|minimum|Average|average)', s)
+    if range_match:
+        return f"{range_match.group(2)}-06-30"
 
     return None
 

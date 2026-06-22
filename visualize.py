@@ -109,8 +109,52 @@ def fig1_beliefs(db_path=DUCKDB_PATH):
     print(f"Saved {out}")
 
 
+def _build_survey_signal(con):
+    """Build a unified survey direction signal: pace data + first-differenced levels."""
+    pace = con.execute("""
+        SELECT strftime(survey_date, '%Y-%m') as period,
+               AVG(pctl50) as value
+        FROM nyfed_survey_bs
+        WHERE pctl50 IS NOT NULL
+          AND horizon_date > survey_date
+          AND DATEDIFF('day', survey_date, horizon_date) BETWEEN 30 AND 730
+          AND (variable LIKE '%purchase_pace%'
+               OR variable LIKE '%soma_change%'
+               OR variable LIKE '%portfolio_change%'
+               OR variable LIKE '%_chg%')
+        GROUP BY strftime(survey_date, '%Y-%m')
+        ORDER BY period
+    """).fetchdf()
+
+    level = con.execute("""
+        SELECT strftime(survey_date, '%Y-%m') as period,
+               AVG(pctl50) as level
+        FROM nyfed_survey_bs
+        WHERE pctl50 IS NOT NULL
+          AND horizon_date > survey_date
+          AND DATEDIFF('day', survey_date, horizon_date) BETWEEN 90 AND 730
+          AND (variable LIKE '%soma_size_dist%'
+               OR variable LIKE '%soma_portfolio_level%'
+               OR variable LIKE '%soma_total%'
+               OR variable = 'total_assets')
+          AND pctl50 > 100
+        GROUP BY strftime(survey_date, '%Y-%m')
+        ORDER BY period
+    """).fetchdf()
+
+    level['gap'] = level['period'].apply(lambda x: pd.Timestamp(x + '-01')).diff().dt.days
+    level['value'] = level['level'].diff()
+    level = level[(level['gap'] <= 180) & level['value'].notna()].copy()
+
+    combined = pace[['period', 'value']].copy()
+    level_only = level[~level['period'].isin(pace['period'])][['period', 'value']]
+    combined = pd.concat([combined, level_only]).sort_values('period').reset_index(drop=True)
+
+    return combined
+
+
 def fig2_correlation(db_path=DUCKDB_PATH):
-    """Contemporaneous correlation: F_t vs survey expected SOMA change pace."""
+    """Contemporaneous correlation: F_t vs survey expected SOMA change."""
     con = duckdb.connect(db_path, read_only=True)
 
     ft = con.execute("""
@@ -120,80 +164,46 @@ def fig2_correlation(db_path=DUCKDB_PATH):
         ORDER BY period
     """).fetchdf()
 
-    survey = con.execute("""
-        SELECT strftime(survey_date, '%Y-%m') as period,
-               AVG(pctl50) as survey_pace
-        FROM nyfed_survey_bs
-        WHERE pctl50 IS NOT NULL
-          AND (variable LIKE '%purchase_pace%'
-               OR variable LIKE '%soma_change_path%'
-               OR variable LIKE '%_chg%')
-          AND horizon_date BETWEEN survey_date + INTERVAL 30 DAY AND survey_date + INTERVAL 365 DAY
-        GROUP BY strftime(survey_date, '%Y-%m')
-        ORDER BY period
-    """).fetchdf()
-
-    if survey.empty:
-        print("No survey pace data.")
-        con.close()
-        return
-
-    survey_levels = con.execute("""
-        SELECT strftime(survey_date, '%Y-%m') as period,
-               AVG(CASE WHEN variable = 'total_assets' THEN pctl50 END) as survey_level
-        FROM nyfed_survey_bs
-        WHERE variable = 'total_assets'
-          AND horizon_date BETWEEN survey_date + INTERVAL 90 DAY AND survey_date + INTERVAL 365 DAY
-        GROUP BY strftime(survey_date, '%Y-%m')
-        HAVING survey_level IS NOT NULL
-        ORDER BY period
-    """).fetchdf()
-
+    survey = _build_survey_signal(con)
     con.close()
 
-    merged_pace = pd.merge(ft, survey, on='period', how='inner').dropna()
-    merged_level = pd.merge(ft, survey_levels, on='period', how='inner').dropna()
+    if survey.empty:
+        print("No survey data.")
+        return
+
+    merged = pd.merge(ft, survey, on='period', how='inner').dropna()
+    if len(merged) < 5:
+        print(f"Insufficient overlap ({len(merged)} months) for correlation plot.")
+        return
+
+    merged['date'] = pd.to_datetime(merged['period'] + '-15')
 
     from scipy import stats
+    rho, p = stats.spearmanr(merged['f_t'], merged['value'])
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax2 = ax.twinx()
 
-    if len(merged_pace) >= 3:
-        merged_pace['date'] = pd.to_datetime(merged_pace['period'] + '-15')
-        rho_p, p_p = stats.spearmanr(merged_pace['f_t'], merged_pace['survey_pace'])
+    ax.bar(merged['date'], merged['f_t'], width=25, alpha=0.6, color='steelblue',
+           label='$F_t$ (news)')
+    ax.set_ylabel('$F_t$ (news balance)', color='steelblue')
+    ax.set_ylim(-1.1, 1.1)
+    ax.axhline(y=0, color='black', linewidth=0.5)
 
-        ax = axes[0]
-        ax2 = ax.twinx()
-        ax.bar(merged_pace['date'], merged_pace['f_t'], width=25, alpha=0.6, color='steelblue')
-        ax.set_ylabel('$F_t$', color='steelblue')
-        ax.set_ylim(-1.1, 1.1)
-        ax.axhline(y=0, color='black', linewidth=0.5)
-        ax2.plot(merged_pace['date'], merged_pace['survey_pace'], 'o-', color='darkred',
-                 markersize=3, linewidth=1.2)
-        ax2.set_ylabel('Survey: expected change ($bn/mo)', color='darkred')
-        ax2.axhline(y=0, color='darkred', linewidth=0.3, linestyle='--')
-        shade_regimes(ax)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-        ax.set_title(f'$F_t$ vs Change Pace ($\\rho$={rho_p:.2f}, p={p_p:.3f}, N={len(merged_pace)})')
+    ax2.plot(merged['date'], merged['value'], 'o-', color='darkred',
+             markersize=4, linewidth=1.5, label='Survey: expected SOMA change')
+    ax2.set_ylabel('Expected SOMA change ($bn)', color='darkred')
+    ax2.axhline(y=0, color='darkred', linewidth=0.3, linestyle='--')
 
-    if len(merged_level) >= 3:
-        merged_level['date'] = pd.to_datetime(merged_level['period'] + '-15')
-        rho_l, p_l = stats.spearmanr(merged_level['f_t'], merged_level['survey_level'])
+    shade_regimes(ax)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 
-        ax = axes[1]
-        ax2 = ax.twinx()
-        ax.bar(merged_level['date'], merged_level['f_t'], width=25, alpha=0.6, color='steelblue')
-        ax.set_ylabel('$F_t$', color='steelblue')
-        ax.set_ylim(-1.1, 1.1)
-        ax.axhline(y=0, color='black', linewidth=0.5)
-        ax2.plot(merged_level['date'], merged_level['survey_level'], 'o-', color='darkred',
-                 markersize=3, linewidth=1.2)
-        ax2.set_ylabel('Survey: expected SOMA ($bn)', color='darkred')
-        shade_regimes(ax)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-        ax.set_title(f'$F_t$ vs SOMA Level ($\\rho$={rho_l:.2f}, p={p_l:.3f}, N={len(merged_level)})')
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left', frameon=False)
 
-    plt.tight_layout()
+    ax.set_title(f'$F_t$ vs Survey Expectations (Spearman $\\rho$ = {rho:.2f}, p = {p:.3f}, N = {len(merged)})')
+
     out = os.path.join(OUTPUT_DIR, 'fig2_correlation.png')
     plt.savefig(out)
     plt.close()
