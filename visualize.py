@@ -194,9 +194,12 @@ def fig2_correlation(db_path=DUCKDB_PATH):
     ax.set_ylim(-1.1, 1.1)
     ax.axhline(y=0, color='black', linewidth=0.5)
 
-    ax2.plot(merged['date'], merged['value'], 'o-', color='darkred',
-             markersize=4, linewidth=1.5, label='Survey: expected SOMA change')
-    ax2.set_ylabel('Expected SOMA change ($bn)', color='darkred')
+    survey_plot = merged['value'].rank(pct=True) * 2 - 1
+
+    ax2.plot(merged['date'], survey_plot, 'o-', color='darkred',
+             markersize=4, linewidth=1.5, label='Survey expectation (percentile rank)')
+    ax2.set_ylabel('Survey expectation (rank)', color='darkred')
+    ax2.set_ylim(-1.1, 1.1)
     ax2.axhline(y=0, color='darkred', linewidth=0.3, linestyle='--')
 
     shade_regimes(ax)
