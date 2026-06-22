@@ -1,4 +1,4 @@
-# Fed Balance Sheet Expectations
+# Balance Sheet Expectations
 
 Professional balance-sheet beliefs track the news contemporaneously. Following Bybee (2025), this project constructs an LLM-derived belief index from news headlines and compares it with professional forecaster expectations from the NY Fed surveys.
 
