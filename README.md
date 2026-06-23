@@ -1,10 +1,57 @@
 # Fed Balance Sheet Expectations
 
-An LLM-derived news belief index ($F_t$) for Federal Reserve balance-sheet size expectations, compared with NY Fed survey (SPD/SMP/SME) professional-forecaster expectations, following Bybee (2025).
+An LLM-derived news belief index ($F_t$, following Bybee 2025) for Federal Reserve balance-sheet expectations, compared with NY Fed professional-forecaster survey expectations (SPD/SMP/SME). The survey-side test object is the **sign of round-to-round revisions** in median balance-sheet expectations at a fixed horizon within each survey block. A **horizon-class split** separates near-term (pace/next-period) from long-run (terminal settle-point) beliefs, which are tested independently.
 
-## Data
+## Methodology: revision-direction survey object
 
-### News corpus (2011--2026)
+The NY Fed surveys ask about the Fed balance sheet intermittently, and the question format (variable, unit, horizon grid) changes across eras. No single survey variable spans the full 2011--2026 period. Instead of splicing incompatible measures, this design keeps each contiguous block's native variable and extracts the **sign** of the round-to-round change in the median (pctl50) at a fixed absolute horizon:
+
+- **+1** (toward expansion): forecasters revised the balance sheet upward (larger SOMA / more purchases / higher reserves)
+- **-1** (toward contraction): forecasters revised downward
+- **0**: no change (exact tie)
+
+Signs are comparable across blocks even when the underlying units ($ billions, $ billions/month, level vs. change path) are not. The object is differenced by construction, removing trend and regime confounds that affect level comparisons.
+
+### The 7 survey blocks
+
+| Block | Variable | Range | Regime | Pairs |
+|-------|----------|-------|--------|-------|
+| A | SOMA size (total) | 2011-03 to 2012-07 | Pre-taper / QE2-OT | 7 |
+| B | SOMA change path (Tsy) | 2013-04 to 2014-10 | QE3 / taper tantrum | 6 |
+| C | Reserves path | 2017-06 to 2019-06 | QT1 / reinvestment end | 3 |
+| D | SOMA size (total) | 2019-01 to 2019-03 | End-QT1 / COVID QE | 1 |
+| E | Purchase pace (Tsy) | 2021-01 to 2022-01 | COVID QE / taper | 8 |
+| F | SOMA change path (Tsy) | 2022-03 to 2022-07 | QT2 onset | 3 |
+| G | Total assets (level) | 2024-01 to 2026-04 | QT2 / current | 18 |
+| | | **Total** | | **46** |
+
+Within each block, a single horizon date is selected by maximising the number of informative (non-zero) revision pairs, with ties broken toward nearer horizons.
+
+## Horizon-class split
+
+The survey asks conceptually different questions depending on how far the selected horizon extends beyond the block's survey window:
+
+- **Near-term** (horizon offset $\leq$ 1.5 years): pace, next-period level, or near-horizon expectations. These revise on the same timescale as a high-frequency news index and are the appropriate test object for $F_t$.
+- **Long-run** (horizon offset > 1.5 years): terminal or settle-point beliefs at multi-year horizons. A different, slower-moving belief object that a daily news index should not be expected to track the same way.
+
+| Block | Selected horizon | Offset from last round | Class |
+|-------|-----------------|----------------------|-------|
+| A | 2012-12-31 | +0.4 yr | Near-term |
+| B | 2017-06-30 | +2.7 yr | Long-run |
+| C | 2025-06-30 | +6.1 yr | Long-run |
+| D | 2019-12-31 | +0.8 yr | Near-term |
+| E | 2022-05-15 | +0.3 yr | Near-term |
+| F | 2023-11-15 | +1.3 yr | Near-term |
+| G | 2026-11-15 | +0.6 yr | Near-term |
+
+**Near-term**: blocks A, D, E, F, G (5 blocks, 37 revision pairs).
+**Long-run**: blocks B, C (2 blocks, 9 revision pairs).
+
+Pooling the two classes is reported for completeness but is not the headline, since it mixes distinct belief objects.
+
+## News index ($F_t$)
+
+### Corpus (2011--2026)
 
 | Source | Articles |
 |--------|----------|
@@ -13,108 +60,107 @@ An LLM-derived news belief index ($F_t$) for Federal Reserve balance-sheet size 
 | Google News RSS | 1,236 |
 | **Total** | **4,749** |
 
-The source mix shifts across regimes: NYT provides the majority of early coverage (2011--2016), GDELT dominates the middle period (2017--2022), and Google News contributes primarily to recent coverage (2023--2026).
+Each headline (with article snippet when available) is classified into four categories using a k=3 ensemble of Claude Haiku calls with majority vote:
 
-### NY Fed surveys
+- **increase**: signals Fed balance-sheet growth (QE, emergency lending, slower runoff)
+- **decrease**: signals balance-sheet contraction (QT, runoff, tapering)
+- **uncertain**: balance-sheet-related but directionally ambiguous
+- **not_relevant**: not about balance-sheet size or purchase/runoff policy
 
-- **PDF surveys (2011--2023)**: 59 survey rounds extracted from NY Fed PDF releases using Claude Haiku, cached as JSON. This produces a machine-readable panel of balance-sheet expectations (median, 25th, 75th percentile paths at multiple horizons) that is not otherwise available in structured form.
-- **Excel surveys (2023--2026)**: 23 survey rounds from NY Fed machine-readable Excel releases.
-- **Total**: 82 distinct survey dates, 4,999 variable-horizon observations across SPD, SMP, and SME panels.
+749 of 4,749 articles (15.8%) are classified as relevant.
 
-### FRED balance-sheet actuals
-
-Weekly Federal Reserve balance-sheet components (WALCL, TREAST, WSHOMCB, WRESBAL) from FRED, 2008--present (964 observations).
-
-## Method
-
-### Classification
-
-Each news headline (with article snippet when available) is classified into four categories using a k=3 ensemble of Claude Haiku calls with majority vote:
-
-- **increase** -- the article signals Fed balance-sheet growth (asset purchases, QE, emergency lending facilities, slower runoff)
-- **decrease** -- the article signals balance-sheet contraction (QT, runoff, tapering, normalization)
-- **uncertain** -- the article is about balance-sheet direction but the signal is ambiguous
-- **not_relevant** -- the article is not about balance-sheet size or purchase/runoff policy
-
-Of 4,749 articles, 749 (15.8%) are classified as relevant (increase, decrease, or uncertain).
-
-### Belief index
-
-The monthly balance statistic is computed over relevant articles only:
+### Balance statistic
 
 $$F_t = \frac{n_{\text{increase}} - n_{\text{decrease}}}{n_{\text{increase}} + n_{\text{decrease}}}$$
 
-$F_t$ ranges from $-1$ (all relevant articles signal decrease) to $+1$ (all signal increase). Months with no increase or decrease articles receive $F_t = \text{null}$.
-
-### Regime segmentation
-
-Six Fed balance-sheet regimes are defined by policy transition dates:
-
-| Regime | Period |
-|--------|--------|
-| Pre-Taper | Jan 2011 -- May 2013 |
-| Taper Tantrum | May 2013 -- Oct 2014 |
-| Reinvestment | Oct 2014 -- Sep 2017 |
-| QT1 | Sep 2017 -- Jul 2019 |
-| QE (COVID) | Jul 2019 -- May 2022 |
-| QT2 | Jun 2022 -- present |
+Computed monthly over relevant articles. Ranges from $-1$ (all decrease) to $+1$ (all increase). Months with no increase or decrease articles are null.
 
 ## Results
 
 ### Regime identification
 
-$F_t$ distinguishes Fed balance-sheet regimes by sign. Mean $F_t$ is positive during expansion periods and negative during contraction periods (months with $n_{\text{relevant}} \geq 3$):
+$F_t$ distinguishes Fed balance-sheet regimes by sign. Mean $F_t$ is positive during expansion periods and negative during contraction:
 
-| Regime | Months ($n_{\text{rel}} \geq 3$) | Mean $F_t$ | Total relevant articles |
-|--------|----------------------------------|-------------|------------------------|
-| Pre-Taper | 3 | +1.00 | 31 |
-| Taper Tantrum | 12 | $-0.33$ | 76 |
-| Reinvestment | 2 | $-1.00$ | 9 |
-| QT1 | 7 | $-0.39$ | 56 |
-| QE (COVID) | 17 | +0.06 | 186 |
-| QT2 | 21 | $-0.39$ | 355 |
+| Regime | Months ($n_{\text{rel}} \geq 3$) | Mean $F_t$ |
+|--------|----------------------------------|-------------|
+| Pre-Taper | 3 | +1.00 |
+| Taper Tantrum | 12 | $-0.33$ |
+| Reinvestment | 2 | $-1.00$ |
+| QT1 | 7 | $-0.39$ |
+| QE (COVID) | 17 | +0.06 |
+| QT2 | 21 | $-0.39$ |
 
-### Figure 1: Belief index with regime shading
+#### Figure: belief index with regime shading
 
 ![Beliefs](output/fig1_beliefs.png)
 
 $F_t$ over time across six Fed regimes. 749 relevant articles out of 4,749 total (15.8%).
 
-### Contemporaneous correlation with survey expectations
+### Revision-direction test: near-term (primary)
 
-The contemporaneous relationship between $F_t$ and NY Fed survey expectations is measured using a single consistent survey variable: median expected total assets at a ~12-month horizon (`total_assets`), averaged across panels. The sample falls entirely within QT2 (2024--2026).
+The near-term class (blocks A, D, E, F, G) is the primary test object. Of 37 survey revision pairs, 10 survive the inner join with $F_t$ (requiring $n_{\text{relevant}} \geq 3$ in both the current and prior survey months). After excluding 1 exact zero, 9 observations are used. The predictor is $\Delta F_t$ (the change in $F_t$ between consecutive survey rounds).
 
-| Test | Spearman $\rho$ | p-value | N |
-|------|-----------------|---------|---|
-| Levels (regime-confounded) | +0.69 | 0.018 | 11 |
-| First differences (regime-stripped) | +0.42 | 0.223 | 10 |
+| Test | Statistic | Value | p-value | N |
+|------|-----------|-------|---------|---|
+| Spearman ($\Delta F_t$ vs revision sign) | $\rho$ | +0.37 | 0.332 | 9 |
+| Sign agreement ($\Delta F_t$ and revision same direction) | rate | 5/7 = 71% | 0.453 (binomial) | 7 |
+| OLS (quarter-clustered SEs) | $\beta$ | +0.39 | 0.316 | 9 |
 
-The level correlation is positive but confounds the shared QE/QT regime structure. First-differencing removes this structure; the differenced correlation is positive but not statistically significant at conventional levels.
+All point estimates are in the expected direction (positive $\rho$, agreement rate above 50%, positive $\beta$). The test is underpowered at N = 9.
 
-### Figure 2: Contemporaneous co-movement
+**Supporting color (regime-confounded):** the Spearman correlation of the $F_t$ *level* (not differenced) with near-term revision sign is $\rho$ = +0.65 (p = 0.058, N = 9). This is the strongest signal but reflects shared regime structure (both $F_t$ levels and revision directions flip sign across QE/QT eras) and is not interpretable as within-regime co-movement.
 
-![Contemporaneous](output/fig3_contemporaneous.png)
+#### Figure: $\Delta F_t$ vs survey revision sign (by horizon class)
 
-Left: scatter of $\Delta F_t$ vs $\Delta$Survey (first differences, lag 0). Right: $F_t$ and median expected total assets over time.
+![Revision direction](output/revision_direction.png)
 
-### Lead-lag analysis
+Left: scatter of $\Delta F_t$ vs revision sign, colored by horizon class (blue = near-term, orange = long-run), with per-class agreement rates annotated. Right: per-block attrition from the $F_t$ inner join.
 
-Cross-correlation of first-differenced $F_t$ and survey expectations at lags $\pm6$ months, with Newey-West (HAC) standard errors. Pre-specified test: whether news leads the survey at lag +1.
+### Long-run observation
 
-| Target | Lag | Spearman $\rho$ | p (HAC) | N |
-|--------|-----|-----------------|---------|---|
-| Total assets | +1 | +0.09 | 0.429 | 34 |
-| Treasury holdings | +1 | +0.16 | 0.685 | 41 |
-| MBS holdings | +1 | +0.16 | 0.642 | 40 |
+The long-run class (blocks B, C) yields 5 observations after the $F_t$ join. All 5 surviving terminal/settle-point revisions are upward (+1): forecasters only ever revised terminal balance-sheet expectations upward over this sample (2013--2019). With constant revision sign, rank correlation is undefined and no statistical test applies. This is reported as a descriptive finding about the direction of long-run belief revision during the QE3-through-QT1 era, not as a test of $F_t$.
 
-The pre-specified lead (lag +1) is positive for all three survey targets but not statistically significant after HAC correction.
+### Pooled (for completeness)
 
-## Limitations
+Pooling all 14 non-zero surviving observations across both horizon classes:
 
-- **Small N per consistent survey measure.** The NY Fed surveys balance-sheet questions intermittently and the question format changes across eras. The best-covered single variable (`total_assets`) yields N = 11 merged observations with $F_t$. This limits the power of differenced tests.
-- **Level correlations confound the QE/QT regime.** $F_t$ and survey expectations both flip sign by regime. Raw level correlations reflect this shared structure rather than within-regime co-movement.
-- **News-source mix shifts across regimes.** NYT dominates the early period (2011--2016), GDELT the middle (2017--2022), and Google News the recent period. Source-specific editorial and topical biases may affect $F_t$ differently across eras.
-- **Sparse early coverage.** Many months before 2017 have fewer than 3 relevant articles, producing extreme $F_t$ values ($\pm1$) and limiting usable overlap with the survey.
+| Test | Statistic | Value | p-value | N |
+|------|-----------|-------|---------|---|
+| Spearman ($\Delta F_t$ vs revision sign) | $\rho$ | +0.14 | 0.624 | 14 |
+| Sign agreement | rate | 6/11 = 55% | 1.000 | 11 |
+| OLS (quarter-clustered SEs) | $\beta$ | +0.17 | 0.635 | 14 |
+
+The pooled result mixes near-term and long-run horizon classes and dilutes the near-term signal with the constant-sign long-run observations. It is not the headline.
+
+### Per-block attrition
+
+| Block | Class | Survey pairs | After $F_t$ join | Survival | Notes |
+|-------|-------|-------------|-------------------|----------|-------|
+| A | Near-term | 7 | 0 | 0% | Lost (sparse news 2011--2012) |
+| B | Long-run | 6 | 3 | 50% | |
+| C | Long-run | 3 | 2 | 67% | |
+| D | Near-term | 1 | 0 | 0% | Lost (sparse news 2019) |
+| E | Near-term | 8 | 2 | 25% | Heavy attrition |
+| F | Near-term | 3 | 1 | 33% | Heavy attrition |
+| G | Near-term | 18 | 7 | 39% | |
+| **Total** | | **46** | **15** | **33%** | |
+
+Near-term: 27 of 37 pairs lost to news sparsity (73%). Long-run: 4 of 9 lost (44%).
+
+## Binding constraint and next steps
+
+The survey side spans all major Fed balance-sheet regimes from 2011 to 2026 (46 revision pairs across 7 blocks). The binding constraint is news coverage: 73% of near-term revision pairs are lost because the $F_t$ index has too few relevant articles in one or both months of the pair. This is driven by title-only GDELT snippets and sparse early NYT coverage.
+
+A full-text news corpus (full NYT/WSJ articles via Factiva or DNA) would recover up to 27 additional near-term observations -- the class that matters for validating $F_t$ against high-frequency belief revision. This is **necessary** infrastructure for powering the near-term test but **not sufficient**: denser news raises N but does not by itself imply the test will reach statistical significance. Obtaining and classifying a full-text corpus is the planned next phase.
+
+## Earlier iterations
+
+Two earlier analysis scripts remain in the repository:
+
+- `contemporaneous_analysis.py`: contemporaneous co-movement test using a single spliced survey variable (`total_assets`). Collapsed to N = 11 due to survey inconsistency; superseded by the revision-direction design.
+- `leadlag_analysis.py`: lead-lag cross-correlation with HAC standard errors. Limited by the same single-variable constraint.
+
+Both are retained for reference. The revision-direction methodology with horizon-class split is the current approach.
 
 ## Reproduce
 
@@ -140,19 +186,19 @@ python collect_gdelt.py              # GDELT news articles
 python collect_gnews.py              # Google News articles
 python collect_nyt.py                # NYT articles
 
-# 2. Classify
+# 2. Classify (k=3 ensemble, majority vote)
 python classify.py validate          # Validation sample (optional)
-python classify.py run               # Full classification (k=3 ensemble)
+python classify.py run               # Full classification
 
 # 3. Aggregate
 python aggregate.py                  # Monthly F_t
 
-# 4. Analysis
-python leadlag_analysis.py           # Lead-lag cross-correlation
-python contemporaneous_analysis.py   # Contemporaneous co-movement tests
+# 4. Revision-direction test (primary analysis)
+python revision_direction.py         # Horizon-class split, 3 tests, figure
 
-# 5. Figures
-python visualize.py                  # Fig 1 (beliefs) and Fig 2 (correlation)
+# Earlier iterations (retained for reference):
+# python leadlag_analysis.py
+# python contemporaneous_analysis.py
 ```
 
 ## References
